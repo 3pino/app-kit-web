@@ -57,6 +57,18 @@ describe('Shell.confirm', () => {
   });
 });
 
+describe('Shell.confirm（重ねて出したとき）', () => {
+  it('前の確認は false で解決され、新しい確認が出る', async () => {
+    const first = shell.confirm({ title: '1', okLabel: 'ok' });
+    const second = shell.confirm({ title: '2', okLabel: 'ok' });
+    await expect(first).resolves.toBe(false);
+    expect(shell.confirmReq?.title).toBe('2');
+    shell.confirmReq?.resolve(true);
+    await expect(second).resolves.toBe(true);
+    expect(shell.confirmReq).toBeNull();
+  });
+});
+
 describe('Shell.openLightbox', () => {
   it('1 枚だけ開くと、前後の一覧はない', () => {
     shell.openLightbox({ src: 'a' });

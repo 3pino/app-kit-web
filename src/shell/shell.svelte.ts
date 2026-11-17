@@ -45,7 +45,9 @@ export class Shell<A = unknown, I = unknown> {
     this.toasts = this.toasts.filter((t) => t.id !== id);
   }
 
+  /** 確認を出す。前の確認が開いたままなら、それは「取り消し」（false）で閉じてから、新しいのを出す（待ちが残らない） */
   confirm(opts: Omit<ShellConfirm, 'resolve'>): Promise<boolean> {
+    this.confirmReq?.resolve(false);
     return new Promise((resolve) => {
       this.confirmReq = {
         ...opts,
