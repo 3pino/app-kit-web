@@ -19,7 +19,7 @@ export type DesktopDownloadEvent =
 /** 見つかったデスクトップの更新（plugin-updater の Update の、使う部分だけ） */
 export type DesktopUpdate = {
   version: string;
-  body: string | null;
+  body?: string | null;
   downloadAndInstall(onEvent: (ev: DesktopDownloadEvent) => void): Promise<void>;
   close(): Promise<void>;
 };
@@ -27,6 +27,6 @@ export type DesktopUpdate = {
 /** GitHub のリリース（Android の APK を探すため。形は GitHub の API の応答と同じ） */
 export type AndroidRelease = {
   tag_name: string;
-  body: string | null;
+  body?: string | null;
   assets: { name: string; browser_download_url: string }[];
 };
