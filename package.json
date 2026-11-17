@@ -1,0 +1,65 @@
+{
+  "name": "@3pino/app-kit-web",
+  "version": "0.1.0",
+  "description": "3pino のアプリの土台（Svelte 5 / TypeScript）。プラットフォームの判定・ストレージ・ネイティブ呼び出し・トースト・確認・拡大表示・戻る操作など、アプリに依らない部分",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./core": {
+      "types": "./src/core/index.ts",
+      "default": "./src/core/index.ts"
+    },
+    "./core/*": {
+      "types": "./src/core/*.ts",
+      "default": "./src/core/*.ts"
+    },
+    "./shell": {
+      "types": "./src/shell/index.ts",
+      "default": "./src/shell/index.ts"
+    },
+    "./shell/*.svelte": {
+      "svelte": "./src/shell/*.svelte",
+      "default": "./src/shell/*.svelte"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "docs",
+    "!src/**/*.test.ts",
+    "!src/test-support",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@3pino/design-system": ">=0.4.1",
+    "@3pino/ui-kit-web": ">=0.3.0",
+    "@lucide/svelte": "^1.53.0",
+    "@tauri-apps/api": "^2.12.2",
+    "svelte": "^5.57.0"
+  },
+  "peerDependenciesMeta": {
+    "@tauri-apps/api": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@3pino/design-system": "file:../design-system",
+    "@3pino/ui-kit-web": "file:../ui-kit-web",
+    "@lucide/svelte": "^1.53.0",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tauri-apps/api": "^2.12.2",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/node": "^26.6.4",
+    "jsdom": "^29.1.1",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.6",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
+  }
+}
