@@ -39,3 +39,11 @@ npm test        # vitest（jsdom の部品の試験を含む）
 ## ライセンス
 
 MIT（[LICENSE](LICENSE)）。
+
+## v0.2.0 で増えたもの
+
+- `@3pino/app-kit-web/updater`: アップデートの状態の機械（`Updater`）・判定（`updateCheck`）・状態の型。仕組みへの口は `UpdateBackend`（アプリが作る。Tauri のアップデーターや APK の取得）。
+- `@3pino/app-kit-web/settings`: 設定の 1 項目の部品（`SettingsField.svelte`）と、項目の決まり（`SettingBinding`・`SettingControl`）。読み書きはアプリが渡す。
+- `@3pino/app-kit-web/core/dropFiles`: OS のドロップ（Linux・Windows のネイティブのパス）の部品。Tauri の呼び出しは必要になったときに読む（peer の `@tauri-apps/api`・`@tauri-apps/plugin-fs`）。
+
+Rust 側の共有の設計は [docs/tauri-kit-design.md](docs/tauri-kit-design.md)（コードは未移動）。

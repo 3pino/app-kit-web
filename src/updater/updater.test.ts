@@ -89,6 +89,17 @@ describe('Updater（状態の機械）', () => {
     expect(u.state.kind).toBe('installing');
   });
 
+  it('Android: 今の版と同じか古い最新なら latest（APK は取らない）', async () => {
+    const log: string[] = [];
+    const u = new Updater(
+      backend({ kind: () => 'android', version: async () => '1.1.0', log }),
+      true,
+    );
+    await u.check();
+    expect(u.state.kind).toBe('latest');
+    expect(log).toEqual([]);
+  });
+
   it('確認が失敗したら、quiet なら idle、そうでなければ error（メッセージ付き）', async () => {
     const fail = backend({ checkDesktop: async () => { throw new Error('boom'); } });
     const quiet = new Updater(fail, true);
