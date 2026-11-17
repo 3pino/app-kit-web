@@ -27,6 +27,6 @@ export type DesktopUpdate = {
 /** GitHub のリリース（Android の APK を探すため。形は GitHub の API の応答と同じ） */
 export type AndroidRelease = {
   tag_name: string;
-  body?: string | null;
+  body: string | null;
   assets: { name: string; browser_download_url: string }[];
 };
