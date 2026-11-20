@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
 import HotkeySettings from './HotkeySettings.svelte';
 
 // ホットキーの設定画面: 節は初めは折りたたみ。キーの追加（記録）・外す・既定に戻す・重なりの警告を、渡された関数で行う
@@ -129,3 +129,111 @@ describe('HotkeySettings', () => {
     expect(document.querySelector('[data-command="new"]')!.textContent).not.toContain('同じキー');
   });
 });
+
+// ---- 文言・振る舞いの選び方（options）・節なし・行の追加（rowExtra） ----
+
+describe('HotkeySettings の選び方', () => {
+  const flat = [
+    { id: 'new', name: '新規', description: '文書を作る' },
+    { id: 'close', name: '閉じる' },
+  ];
+  function mountWith(over: Record<string, unknown>, props: Record<string, unknown> = {}) {
+    const store: Record<string, string[]> = { new: ['Ctrl+N'], close: [] };
+    const spy = { add: vi.fn(), remove: vi.fn(), reset: vi.fn(), recording: vi.fn() };
+    instance = mount(HotkeySettings, {
+      target: document.body,
+      props: {
+        commands: flat,
+        keys: (id: string) => store[id] ?? [],
+        isCustom: () => false,
+        conflicts: new Map(),
+        add: (id: string, k: string) => {
+          spy.add(id, k);
+          store[id] = [...(store[id] ?? []), k];
+        },
+        remove: spy.remove,
+        reset: spy.reset,
+        onrecording: spy.recording,
+        ...over,
+      },
+    });
+    flushSync();
+    return { spy };
+  }
+  const addBtn = (name: string) => document.querySelector<HTMLElement>(`button[aria-label="${name}のキーを追加"], button[aria-label="${name} のホットキーを追加"]`);
+
+  it('節を渡さなければ、節の見出しを作らず、操作を並べて出す（説明も出す）', async () => {
+    mountWith({});
+    expect(document.querySelectorAll('.hotkey-group-toggle')).toHaveLength(0);
+    expect([...document.querySelectorAll('[data-command]')].map((e) => (e as HTMLElement).dataset.command)).toEqual(['new', 'close']);
+    expect(document.querySelector('[data-command="new"]')!.textContent).toContain('文書を作る');
+  });
+
+  it('文言は labels・conflictText で変えられる。既定の文言は変わらない', async () => {
+    const { spy } = mountWith(
+      {
+        conflicts: new Map([['Ctrl+N', ['new', 'x']]]),
+        allNames: (id: string) => (id === 'x' ? '隠れた' : (flat.find((c) => c.id === id)?.name ?? id)),
+        options: {
+          labels: { add: (n: string) => `${n} のホットキーを追加`, remove: (n: string, k: string) => `${n} から ${k} を外す` },
+          conflictText: (cl: { key: string; names: string[] }[]) => `「${cl[0].names.join('」「')}」と同じキーです`,
+        },
+      },
+    );
+    expect(addBtn('新規')).not.toBeNull();
+    expect(document.querySelector('button[aria-label="新規 から Ctrl+N を外す"]')).not.toBeNull();
+    expect(document.querySelector('[data-command="new"]')!.textContent).toContain('「隠れた」と同じキーです');
+    addBtn('新規')!.click();
+    await flush();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(spy.add).toHaveBeenCalledWith('new', 'Ctrl+Y');
+  });
+
+  it('既定の文言（options なし）は、これまでと同じ', () => {
+    mountWith({ conflicts: new Map([['Ctrl+N', ['new', 'x']]]), allNames: () => '隠れた' });
+    expect(document.querySelector('[data-command="new"]')!.textContent).toContain('同じキーが、ほかの操作にもあります: Ctrl+N（隠れた）');
+    expect(document.querySelector('button[aria-label="新規のキーを追加"]')).not.toBeNull();
+  });
+
+  it('escapeCancels のとき、修飾キーなしの Esc は記録を取り消す（追加しない）', async () => {
+    const { spy } = mountWith({ options: { escapeCancels: true } });
+    addBtn('新規')!.click();
+    await flush();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await flush();
+    expect(spy.add).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-command="new"]')!.textContent).not.toContain('キーを押してください');
+    // 修飾キー付きの Esc は、ふつうに記録する
+    addBtn('新規')!.click();
+    await flush();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', ctrlKey: true, bubbles: true, cancelable: true }));
+    expect(spy.add).toHaveBeenCalledWith('new', 'Ctrl+Escape');
+  });
+
+  it('mouse: false のとき、マウスの戻る・進むは記録しない', async () => {
+    const { spy } = mountWith({ options: { mouse: false } });
+    addBtn('新規')!.click();
+    await flush();
+    window.dispatchEvent(new MouseEvent('mouseup', { button: 3, bubbles: true, cancelable: true }));
+    expect(spy.add).not.toHaveBeenCalled();
+  });
+
+  it('hotkeys（Mod・Meta）で、記録する文字の書き方が変わる', async () => {
+    const { spy } = mountWith({ hotkeys: { ctrl: 'Mod', meta: 'separate', plus: 'Plus' } });
+    addBtn('新規')!.click();
+    await flush();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', ctrlKey: true, metaKey: true, bubbles: true, cancelable: true }));
+    expect(spy.add).toHaveBeenCalledWith('new', 'Mod+Meta+Y');
+  });
+
+  it('rowExtra は操作の行の下に、操作ごとに出す', () => {
+    const extra = createRawSnippet((c: () => HotkeyItemLike) => ({
+      render: () => `<div class="extra-row">付け足し:${c().id}</div>`,
+    }));
+    mountWith({ rowExtra: extra });
+    expect(document.querySelector('[data-command="new"] .extra-row')!.textContent).toBe('付け足し:new');
+    expect(document.querySelector('[data-command="close"] .extra-row')!.textContent).toBe('付け足し:close');
+  });
+});
+
+type HotkeyItemLike = { id: string };

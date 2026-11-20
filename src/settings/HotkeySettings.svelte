@@ -1,10 +1,32 @@
 <script lang="ts" module>
+  import type { IconRef } from '@3pino/ui-kit-web/icons';
+
   /** 画面に出す操作 1 つ */
   export interface HotkeyItem {
     id: string;
     name: string;
-    /** 節の名前（`groups` のどれか） */
-    group: string;
+    /** 節の名前（`groups` を渡したときは必須。渡さないときは使わない） */
+    group?: string;
+    /** 名前の下に出す説明（省くと出さない） */
+    description?: string;
+    /** 名前の左に出すアイコン（省くと出さない） */
+    icon?: IconRef;
+  }
+
+  /** 画面の文言・振る舞いの選び方（省くと既定。既定は、この画面が最初からしていたこと） */
+  export interface HotkeyScreenOptions {
+    /** マウスの「戻る」「進む」のボタンを記録するか（既定 true） */
+    mouse?: boolean;
+    /** 修飾キーなしの Esc で記録を取り消すか（既定 false。false のときは Esc もキーとして記録する） */
+    escapeCancels?: boolean;
+    /** ボタンの名前（既定: 「○○のキーを追加」「○○のキーを既定に戻す」「○○の Ctrl+X を外す」） */
+    labels?: {
+      add?: (name: string) => string;
+      reset?: (name: string) => string;
+      remove?: (name: string, key: string) => string;
+    };
+    /** 重なりの警告の文（clashes は、この操作のキーごとに、ぶつかっている操作の名前）。省くと既定の文 */
+    conflictText?: (clashes: { key: string; names: string[] }[]) => string;
   }
 </script>
 
@@ -19,13 +41,15 @@
   import IconButton from '@3pino/ui-kit-web/IconButton.svelte';
   import SettingRow from '@3pino/ui-kit-web/SettingRow.svelte';
   import StatusLine from '@3pino/ui-kit-web/StatusLine.svelte';
-  import { formatHotkey, hotkeyFromEvent, hotkeyFromMouse } from '../core/hotkeys';
+  import type { Snippet } from 'svelte';
+  import { formatHotkey, hotkeyFromEvent, hotkeyFromMouse, type HotkeyOptions } from '../core/hotkeys';
 
   // 設定の「ホットキー」の画面: 操作ごとに、キーを複数決められる（追加・外す・既定に戻す）。
   // 何があるか（commands・groups）と、いまのキー・保存（keys・isCustom・add・remove・reset）は、使う側が渡す（保存先・既定は、アプリの決まり）。
   // 記録のあいだは、押したキーを、ほかの操作に渡さない（window の捕捉の段で止める。使う側にも onrecording で知らせる）。Esc も、ほかのキーと同じように記録できる。
   // 記録をやめるのは、もう一度「＋」を押す・ほかを押してフォーカスが外れる、とき。マウスの「戻る」「進む」のボタンも記録できる。
-  // 節（まとまり）は、見出しを押して、開く・折りたたむ（初めは、折りたたんである）。
+  // 節（まとまり）は、見出しを押して、開く・折りたたむ（初めは、折りたたんである）。`groups` を渡さなければ、節を作らず、ひとつの並びで出す。
+  // ホットキーの決まり（Meta の扱い・Ctrl の書き方など）は `hotkeys`（core/hotkeys の HotkeyOptions）で渡す。
 
   let {
     commands,
@@ -38,11 +62,14 @@
     remove,
     reset,
     onrecording,
+    hotkeys,
+    options,
+    rowExtra,
   }: {
     /** 画面に出す操作（この順。出さない操作は、渡さない） */
     commands: readonly HotkeyItem[];
-    /** 節の並び */
-    groups: readonly string[];
+    /** 節の並び（省くと、節を作らず、ひとつの並びで出す） */
+    groups?: readonly string[];
     /** 重なりの警告に出す、操作の名前（画面に出さない操作も含む）。省けば、commands から引く */
     allNames?: (id: string) => string;
     /** いま効いているキー */
@@ -56,7 +83,22 @@
     reset: (id: string) => void;
     /** キーの記録を始めた・やめた（記録のあいだは、使う側のホットキーを働かせない） */
     onrecording?: (recording: boolean) => void;
+    /** キーの決まり（省くと既定） */
+    hotkeys?: HotkeyOptions;
+    /** この画面の文言・振る舞い（省くと既定） */
+    options?: HotkeyScreenOptions;
+    /** 操作の行の下に、操作ごとの内容を足す（例: スラッシュコマンドの名前の編集）。行の中の操作は変えない */
+    rowExtra?: Snippet<[HotkeyItem]>;
   } = $props();
+
+  const mouseOn = $derived(options?.mouse ?? true);
+  const escapeCancels = $derived(options?.escapeCancels ?? false);
+  const labelAdd = (name: string) => options?.labels?.add?.(name) ?? `${name}のキーを追加`;
+  const labelReset = (name: string) => options?.labels?.reset?.(name) ?? `${name}のキーを既定に戻す`;
+  const labelRemove = (name: string, key: string) => options?.labels?.remove?.(name, key) ?? `${name}の ${formatHotkey(key)} を外す`;
+  const conflictTextOf = (clashes: { key: string; names: string[] }[]) =>
+    options?.conflictText?.(clashes) ??
+    `同じキーが、ほかの操作にもあります: ${clashes.map((c) => `${formatHotkey(c.key)}（${c.names.join('・')}）`).join('、')}`;
 
   /** キーを記録している操作 */
   let recording = $state<string | null>(null);
@@ -67,7 +109,11 @@
     e.preventDefault();
     e.stopPropagation();
     if (e.isComposing || e.keyCode === 229) return;
-    const text = hotkeyFromEvent(e);
+    if (escapeCancels && e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      recording = null;
+      return;
+    }
+    const text = hotkeyFromEvent(e, hotkeys);
     // 修飾キーだけのときは、続けて押すキーを待つ
     if (!text) return;
     add(id, text);
@@ -77,7 +123,7 @@
   function onRecordMouse(e: MouseEvent): void {
     const id = recording;
     if (!id) return;
-    const text = hotkeyFromMouse(e);
+    const text = hotkeyFromMouse(e, hotkeys);
     if (!text) return;
     e.preventDefault();
     e.stopPropagation();
@@ -91,10 +137,10 @@
     untrack(() => onrecording?.(on));
     if (!on) return;
     window.addEventListener('keydown', onRecordKey, true);
-    window.addEventListener('mouseup', onRecordMouse, true);
+    if (mouseOn) window.addEventListener('mouseup', onRecordMouse, true);
     return () => {
       window.removeEventListener('keydown', onRecordKey, true);
-      window.removeEventListener('mouseup', onRecordMouse, true);
+      if (mouseOn) window.removeEventListener('mouseup', onRecordMouse, true);
     };
   });
   onDestroy(() => onrecording?.(false));
@@ -102,76 +148,89 @@
   /** 開いている節 */
   let opened = $state<Record<string, boolean>>({});
 
-  const sections = $derived(groups.map((g) => ({ title: g, commands: commands.filter((c) => c.group === g) })).filter((s) => s.commands.length > 0));
+  const sections = $derived(
+    groups ? groups.map((g) => ({ title: g, commands: commands.filter((c) => c.group === g) })).filter((s) => s.commands.length > 0) : [],
+  );
   const nameOf = (id: string): string => allNames?.(id) ?? commands.find((c) => c.id === id)?.name ?? id;
 
   /** その操作のキーのうち、ほかの操作とも重なっているもの（警告に出す） */
-  function clashes(id: string): string[] {
-    const out: string[] = [];
+  function clashesOf(id: string): { key: string; names: string[] }[] {
+    const out: { key: string; names: string[] }[] = [];
     for (const [key, ids] of conflicts) {
       if (!ids.includes(id)) continue;
-      out.push(`${formatHotkey(key)}（${ids.filter((x) => x !== id).map(nameOf).join('・')}）`);
+      out.push({ key, names: ids.filter((x) => x !== id).map(nameOf) });
     }
     return out;
   }
 </script>
 
-{#each sections as section (section.title)}
-  {@const isOpen = opened[section.title] === true}
-  <section class="setting-section">
-    <Divider class="setting-section-divider" />
-    <h2 class="setting-section-title hotkey-group-title">
-      <button type="button" class="hotkey-group-toggle" aria-expanded={isOpen} onclick={() => (opened[section.title] = !isOpen)}>
-        <ChevronRight size={16} class={isOpen ? 'hotkey-group-chevron hotkey-group-chevron-open' : 'hotkey-group-chevron'} />
-        {section.title}
-        <span class="muted hotkey-group-count">{section.commands.length}</span>
-      </button>
-    </h2>
-    {#if isOpen}
-      {#each section.commands as c (c.id)}
-        {@const clash = clashes(c.id)}
-        <div class="hotkey-command" data-command={c.id}>
-          <SettingRow name={c.name} class="hotkey-row">
-            {#snippet control()}
-              {#each keys(c.id) as k (k)}
-                <kbd class="kbd hotkey-chip">
-                  {formatHotkey(k)}
-                  <button type="button" class="hotkey-remove" aria-label={`${c.name}の ${formatHotkey(k)} を外す`} title="外す" onclick={() => remove(c.id, k)}><X size={12} /></button>
-                </kbd>
-              {:else}
-                <span class="muted hotkey-none">なし</span>
-              {/each}
-              {#if recording === c.id}
-                <span class="hotkey-recording" role="status">キーを押してください…</span>
-              {/if}
-              <IconButton
-                class="hotkey-reset"
-                label={`${c.name}のキーを既定に戻す`}
-                title="既定に戻す"
-                iconSize={16}
-                disabled={!isCustom(c.id)}
-                onclick={() => reset(c.id)}><RotateCcw size={16} /></IconButton
-              >
-              <IconButton
-                class="hotkey-add"
-                label={`${c.name}のキーを追加`}
-                title={recording === c.id ? '記録をやめる' : 'キーを追加'}
-                active={recording === c.id}
-                onclick={() => (recording = recording === c.id ? null : c.id)}
-                onblur={() => {
-                  if (recording === c.id) recording = null;
-                }}><Plus size={16} /></IconButton
-              >
-            {/snippet}
-          </SettingRow>
-          {#if clash.length > 0}
-            <StatusLine kind="warn" icon={TriangleAlert} class="hotkey-conflict">同じキーが、ほかの操作にもあります: {clash.join('、')}</StatusLine>
-          {/if}
-        </div>
-      {/each}
+{#snippet row(c: HotkeyItem)}
+  {@const clash = clashesOf(c.id)}
+  <div class="hotkey-command" data-command={c.id}>
+    <SettingRow name={c.name} description={c.description} icon={c.icon} class="hotkey-row">
+      {#snippet control()}
+        {#each keys(c.id) as k (k)}
+          <kbd class="kbd hotkey-chip">
+            {formatHotkey(k)}
+            <button type="button" class="hotkey-remove" aria-label={labelRemove(c.name, k)} title="外す" onclick={() => remove(c.id, k)}><X size={12} /></button>
+          </kbd>
+        {:else}
+          <span class="muted hotkey-none">なし</span>
+        {/each}
+        {#if recording === c.id}
+          <span class="hotkey-recording" role="status">キーを押してください…</span>
+        {/if}
+        <IconButton
+          class="hotkey-reset"
+          label={labelReset(c.name)}
+          title="既定に戻す"
+          iconSize={16}
+          disabled={!isCustom(c.id)}
+          onclick={() => reset(c.id)}><RotateCcw size={16} /></IconButton
+        >
+        <IconButton
+          class="hotkey-add"
+          label={labelAdd(c.name)}
+          title={recording === c.id ? '記録をやめる' : 'キーを追加'}
+          active={recording === c.id}
+          onclick={() => (recording = recording === c.id ? null : c.id)}
+          onblur={() => {
+            if (recording === c.id) recording = null;
+          }}><Plus size={16} /></IconButton
+        >
+      {/snippet}
+    </SettingRow>
+    {#if clash.length > 0}
+      <StatusLine kind="warn" icon={TriangleAlert} class="hotkey-conflict">{conflictTextOf(clash)}</StatusLine>
     {/if}
-  </section>
-{/each}
+    {@render rowExtra?.(c)}
+  </div>
+{/snippet}
+
+{#if groups}
+  {#each sections as section (section.title)}
+    {@const isOpen = opened[section.title] === true}
+    <section class="setting-section">
+      <Divider class="setting-section-divider" />
+      <h2 class="setting-section-title hotkey-group-title">
+        <button type="button" class="hotkey-group-toggle" aria-expanded={isOpen} onclick={() => (opened[section.title] = !isOpen)}>
+          <ChevronRight size={16} class={isOpen ? 'hotkey-group-chevron hotkey-group-chevron-open' : 'hotkey-group-chevron'} />
+          {section.title}
+          <span class="muted hotkey-group-count">{section.commands.length}</span>
+        </button>
+      </h2>
+      {#if isOpen}
+        {#each section.commands as c (c.id)}
+          {@render row(c)}
+        {/each}
+      {/if}
+    </section>
+  {/each}
+{:else}
+  {#each commands as c (c.id)}
+    {@render row(c)}
+  {/each}
+{/if}
 
 <style>
   .hotkey-group-title {

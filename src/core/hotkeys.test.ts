@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { worksWhileTyping } from './hotkeys';
 import { formatHotkey, hotkeyFromEvent, hotkeyFromMouse, isPlainHotkey, matchesHotkey, matchesIgnoringShift, matchesMouse, normalizeHotkey } from './hotkeys';
 
 const ev = (key: string, init: Partial<Parameters<typeof hotkeyFromEvent>[0]> = {}) => ({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...init });
@@ -77,5 +78,89 @@ describe('マウスの戻る・進むのボタン', () => {
     expect(matchesHotkey(ev('Mouse4'), ['Mouse4'])).toBe(true);
     expect(formatHotkey('Mouse4')).toBe('マウス戻る');
     expect(formatHotkey('Ctrl+Mouse5')).toBe('Ctrl+マウス進む');
+  });
+});
+
+// ---- オプション（HotkeyOptions）。既定は上の試験のまま ----
+const DISNANS = { meta: 'separate', ctrl: 'Mod', letters: 'key-then-code', plus: 'Plus' } as const;
+
+describe('HotkeyOptions: Meta を別の修飾キーにする（separate）', () => {
+  it('Meta は Ctrl と別に書く。並びは Mod・Meta・Alt・Shift', () => {
+    expect(hotkeyFromEvent(ev('t', { metaKey: true }), { meta: 'separate' })).toBe('Meta+T');
+    expect(hotkeyFromEvent(ev('t', { ctrlKey: true, metaKey: true, altKey: true, shiftKey: true }), { meta: 'separate' })).toBe('Ctrl+Meta+Alt+Shift+T');
+    expect(normalizeHotkey('Cmd+t', { meta: 'separate' })).toBe('Meta+T');
+    expect(normalizeHotkey('Cmd+t')).toBe('Ctrl+T');
+  });
+  it('Meta だけのホットキーは、Ctrl のものに当たらない（当たるのは Meta のイベントだけ）', () => {
+    const o = { meta: 'separate' } as const;
+    expect(matchesHotkey(ev('w', { metaKey: true }), ['Meta+W'], o)).toBe(true);
+    expect(matchesHotkey(ev('w', { ctrlKey: true }), ['Meta+W'], o)).toBe(false);
+    expect(matchesHotkey(ev('w', { metaKey: true }), ['Ctrl+W'], o)).toBe(false);
+    // 既定（fold）では、Meta と Ctrl が同じ
+    expect(matchesHotkey(ev('w', { metaKey: true }), ['Ctrl+W'])).toBe(true);
+  });
+});
+
+describe('HotkeyOptions: Ctrl を Mod と書く（ctrl: "Mod"）', () => {
+  it('記録・正規化は Mod と書く。書き方の違う Ctrl も Mod にそろえる', () => {
+    expect(hotkeyFromEvent(ev('s', { ctrlKey: true }), { ctrl: 'Mod' })).toBe('Mod+S');
+    expect(normalizeHotkey('ctrl+shift+s', { ctrl: 'Mod' })).toBe('Mod+Shift+S');
+    expect(normalizeHotkey('Mod+Shift+S', { ctrl: 'Mod' })).toBe('Mod+Shift+S');
+    expect(formatHotkey('Mod+Shift+S')).toBe('Ctrl+Shift+S');
+  });
+});
+
+describe('HotkeyOptions: 英字は押した文字でも当てる（letters: "key-then-code"）', () => {
+  it('押した文字（Dvorak など）でも、キーの位置（code）でも当たる。どちらでもなければ当たらない', () => {
+    const o = { letters: 'key-then-code' } as const;
+    // Dvorak: 位置 KeyD の物理キーが文字 e を出す
+    expect(matchesHotkey({ key: 'e', code: 'KeyD', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }, ['Ctrl+D'], o)).toBe(true);
+    // 文字 D を押す（QWERTY でも、Shift+D は D）
+    expect(matchesHotkey({ key: 'D', code: 'KeyD', ctrlKey: true, metaKey: false, altKey: false, shiftKey: true }, ['Ctrl+Shift+D'], o)).toBe(true);
+    expect(matchesHotkey({ key: 'x', code: 'KeyX', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }, ['Ctrl+D'], o)).toBe(false);
+    // 既定（code のみ）では、文字 e の位置が KeyD でも当たらない
+    expect(matchesHotkey({ key: 'e', code: 'KeyD', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }, ['Ctrl+D'])).toBe(true);
+    expect(matchesHotkey({ key: 'd', code: 'KeyE', ctrlKey: true, metaKey: false, altKey: false, shiftKey: false }, ['Ctrl+D'])).toBe(false);
+  });
+});
+
+describe('HotkeyOptions: + を Plus と書く（plus: "Plus"）', () => {
+  it('記録・正規化は Plus。既定の `Ctrl++` は変えない', () => {
+    expect(hotkeyFromEvent(ev('+', { ctrlKey: true, code: 'Equal' }), { plus: 'Plus' })).toBe('Ctrl+Plus');
+    expect(normalizeHotkey('Ctrl++', { plus: 'Plus' })).toBe('Ctrl+Plus');
+    expect(normalizeHotkey('Ctrl+plus', { plus: 'Plus' })).toBe('Ctrl+Plus');
+    expect(normalizeHotkey('Ctrl++')).toBe('Ctrl++');
+    expect(normalizeHotkey('Ctrl+Plus')).toBe('Ctrl+Plus');
+  });
+});
+
+describe('HotkeyOptions: 入力欄で打っている間に働かせるか（worksWhileTyping）', () => {
+  it('Ctrl・Alt・Meta（separate のとき）を含むものは働く。F キーは functionKeys で働く', () => {
+    expect(worksWhileTyping('Ctrl+B', DISNANS)).toBe(true);
+    expect(worksWhileTyping('Meta+B', DISNANS)).toBe(true);
+    expect(worksWhileTyping('Alt+ArrowLeft', DISNANS)).toBe(true);
+    expect(worksWhileTyping('Shift+A', DISNANS)).toBe(false);
+    expect(worksWhileTyping('A', DISNANS)).toBe(false);
+    expect(worksWhileTyping('F2', DISNANS)).toBe(false);
+    expect(worksWhileTyping('F2', { ...DISNANS, functionKeys: true })).toBe(true);
+    expect(worksWhileTyping('Shift+F2', { functionKeys: true })).toBe(false);
+    expect(worksWhileTyping('Shift+A', { functionKeys: true })).toBe(false);
+  });
+  it('既定（fold）では Meta は Ctrl と同じ。既定の isPlainHotkey は変えない', () => {
+    expect(isPlainHotkey('Meta+B')).toBe(false);
+    expect(isPlainHotkey('Meta+B', { meta: 'separate' })).toBe(false);
+    expect(isPlainHotkey('Shift+A', { meta: 'separate' })).toBe(true);
+    expect(isPlainHotkey('F2', { meta: 'separate' })).toBe(true);
+    expect(isPlainHotkey('Mod+B', { ctrl: 'Mod' })).toBe(false);
+  });
+});
+
+describe('HotkeyOptions: 全部そろえた場合（アプリの決まり）', () => {
+  it('記録した文字は、そのまま正規化される（保存したものを読み直しても変わらない）', () => {
+    const t = hotkeyFromEvent(ev('x', { ctrlKey: true, metaKey: true, shiftKey: true, code: 'KeyX' }), DISNANS);
+    expect(t).toBe('Mod+Meta+Shift+X');
+    expect(normalizeHotkey(t!, DISNANS)).toBe(t);
+    expect(hotkeyFromEvent(ev(' ', { altKey: true, code: 'Space' }), DISNANS)).toBe('Alt+Space');
+    expect(hotkeyFromEvent(ev('Escape', { code: 'Escape' }), DISNANS)).toBe('Escape');
   });
 });

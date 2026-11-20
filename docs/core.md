@@ -24,8 +24,23 @@
 | `swipe` | 横のスワイプの判定（`swipeOffset`・`swipeTriggered`・`atScrollEnd`） | `@3pino/ui-kit-web/gesture` を使う |
 | `backNav` | 戻る操作（Android の戻る・Alt+←）を、アプリの `back()` へつなぐ | 履歴の深さも渡す |
 | `pasteSource` | 貼り付けの経路（Android の notifier か、Linux のネイティブか）を 1 回読んで返す | `platform` を使う |
-| `hotkeys` | ホットキーの文字（`Ctrl+Shift+Tab`・マウスの戻る／進む `Mouse4`／`Mouse5`）と、キー・マウスのイベントの対応（`hotkeyFromEvent`・`matchesHotkey`・`normalizeHotkey`・`formatHotkey` など） | — |
-| `hotkeyBook` | 操作ごとの既定と、利用者が変えた分の決まり（`parseOverrides`・`effectiveKeys`・`overrideOf`・`addKey`・`removeKey`・`findConflicts`）。保存先と画面は持たない（アプリが `Overrides` を読み書きする） | `settings/HotkeySettings.svelte` が画面 |
+| `hotkeys` | ホットキーの文字（`Ctrl+Shift+Tab`・マウスの戻る／進む `Mouse4`／`Mouse5`）と、キー・マウスのイベントの対応（`hotkeyFromEvent`・`matchesHotkey`・`normalizeHotkey`・`formatHotkey`・`worksWhileTyping` など）。すべての関数は、最後の引数に `HotkeyOptions` を取れる（省くと既定。下の「ホットキーの決まり（HotkeyOptions）」） | — |
+| `hotkeyBook` | 操作ごとの既定と、利用者が変えた分の決まり（`parseOverrides`・`effectiveKeys`・`overrideOf`・`addKey`・`removeKey`・`findConflicts`）。保存先と画面は持たない（アプリが `Overrides` を読み書きする）。`HotkeyOptions` を最後の引数に取る | `settings/HotkeySettings.svelte` が画面 |
+
+### ホットキーの決まり（HotkeyOptions）
+
+既定（オプションなし）は、v0.3.0 までと同じ。アプリは次を選ぶ（`core/hotkeys` の型）:
+
+| オプション | 既定 | 意味 |
+|---|---|---|
+| `meta` | `'fold'` | `'separate'` にすると Meta（Windows キー・Cmd）を Ctrl と別の修飾キー（`Meta`）として扱う。並びは Mod・Meta・Alt・Shift |
+| `ctrl` | `'Ctrl'` | `'Mod'` にすると、記録と正規化の出力で Ctrl を `Mod` と書く（プラグインの manifest と同じ書き方）。表示はどちらも `Ctrl` |
+| `letters` | `'code'` | `'key-then-code'` にすると、英字・数字を押した文字でも当てる（だめならキーの位置）。記録は常に位置 |
+| `plus` | `'literal'` | `'Plus'` にすると `+` キーを `Plus` と書く（`Ctrl+Plus`）。既定は `Ctrl++` |
+
+- `worksWhileTyping(text, { functionKeys?, …HotkeyOptions })`: 入力欄で文字を打っている間に働かせてよいか。Ctrl・Alt・（separate のとき）Meta を含むものは働く。`functionKeys: true` なら F1〜F24 も働く。
+- `HotkeySettings` の `hotkeys`（同じ決まり）と `options`（`mouse`・`escapeCancels`・`labels`・`conflictText`。既定は v0.3.0 までの文言・動き）。`groups` を省くと節を作らず一列に出す。`HotkeyItem` は `description`・`icon` を持てる。`rowExtra`（Snippet）は、操作の行の下に操作ごとの内容を足す（アプリ固有の編集などに使う）。
+- 既定から変わった点（v0.4.0）: `overrideOf` は並びの比べ方で書き方の違いも同じとみなす（`['ctrl+t']` と `['Ctrl+T']` は同じ）。`removeKey` は書き方が違っても同じキーを外す。`isPlainHotkey`・`matchesHotkey` などの結果は既定では変わらない。
 | `index` | 上の全部を 1 つから読む（`@3pino/app-kit-web/core`） | 個別に読むほうが依存が小さい |
 
 ## アプリの接続

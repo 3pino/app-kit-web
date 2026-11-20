@@ -49,3 +49,34 @@ describe('findConflicts', () => {
     );
   });
 });
+
+describe('HotkeyOptions を渡したとき（アプリの決まり）', () => {
+  const o = { meta: 'separate', ctrl: 'Mod', plus: 'Plus' } as const;
+  it('保存の読み書きは書き方（Mod・Meta）を保つ。並びは Mod・Meta・Alt・Shift', () => {
+    expect(parseOverrides(JSON.stringify({ a: ['Mod+Meta+Shift+Y', 'mod+y', 'Meta+Plus'], b: ['Ctrl+W'] }), commands, o)).toEqual({
+      a: ['Mod+Meta+Shift+Y', 'Mod+Y', 'Meta+Plus'],
+      b: ['Mod+W'],
+    });
+  });
+  it('既定と同じかは、書き方が違っても比べる。Meta と Ctrl は別', () => {
+    expect(overrideOf(['Mod+T'], ['Ctrl+T'], o)).toBeNull();
+    expect(overrideOf(['Mod+T'], ['Meta+T'], o)).toEqual(['Meta+T']);
+    expect(addKey(['Mod+T'], 'Meta+T', o)).toEqual(['Mod+T', 'Meta+T']);
+    expect(addKey(['Mod+T'], 'ctrl+t', o)).toEqual(['Mod+T']);
+    expect(removeKey(['Mod+T', 'Meta+T'], 'Mod+T', o)).toEqual(['Meta+T']);
+  });
+  it('重なりは、Meta と Ctrl を別のキーとして見る', () => {
+    const cs: HotkeyCommand[] = [
+      { id: 'a', defaults: ['Mod+T'] },
+      { id: 'b', defaults: ['Meta+T'] },
+    ];
+    expect(findConflicts(cs, {}, o).size).toBe(0);
+    expect(findConflicts(cs, {}).get('Ctrl+T')).toEqual(['a', 'b']);
+  });
+});
+
+describe('既定のときの removeKey（書き方の違いも外す）', () => {
+  it('同じキーを、書き方が違っても外す', () => {
+    expect(removeKey(['Ctrl+T', 'F2'], 'ctrl+t')).toEqual(['F2']);
+  });
+});
