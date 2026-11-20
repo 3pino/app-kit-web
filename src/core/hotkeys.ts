@@ -76,9 +76,25 @@ export function matchesMouse(e: MouseEventLike, keys: readonly string[], opts?: 
   return pressed !== null && keys.some((k) => normalizeHotkey(k, opts) === pressed);
 }
 
-/** 書かれたホットキーの文字を、イベントから作る文字と同じ形にそろえる（大文字小文字・並び順・Cmd・Control）。読めなければ null */
+/**
+ * 書かれたホットキーの文字を、イベントから作る文字と同じ形にそろえる（大文字小文字・並び順・Cmd・Control）。読めなければ null。
+ * 空白で区切ると、連続して押すキー（`G G`・`Ctrl+K Ctrl+C`。1 つめを押したあと、1 秒以内に次を押す）
+ */
 export function normalizeHotkey(text: string, opts?: HotkeyOptions): string | null {
   const o = resolve(opts);
+  // `Ctrl + T` のように、`+` のまわりの空白は無いものとして、そのあとで空白を区切りにする
+  const chords = text.trim().replace(/\s*\+\s*/g, '+').split(/\s+/);
+  const out: string[] = [];
+  for (const c of chords) {
+    const n = normalizeChord(c, o);
+    if (n === null) return null;
+    out.push(n);
+  }
+  return out.join(' ');
+}
+
+/** 1 回のキー（修飾キー + キー）をそろえる */
+function normalizeChord(text: string, o: Resolved): string | null {
   const parts = text.split('+').map((p) => p.trim());
   // 最後が空なら、キーが `+` そのもの（例: `Ctrl++`）
   let key = parts.pop() ?? '';
@@ -107,35 +123,94 @@ export function normalizeHotkey(text: string, opts?: HotkeyOptions): string | nu
   return [...order.filter((m) => mod.has(m)).map((m) => (m === 'Ctrl' ? ctrlName : m)), base].join('+');
 }
 
-/** イベントが、ホットキーのどれかに当たるか（letters: 'key-then-code' のときは、押した文字でも位置でも当たる） */
-export function matchesHotkey(e: KeyEventLike, keys: readonly string[], opts?: HotkeyOptions): boolean {
-  const o = resolve(opts);
-  const want = new Set(keys.map((k) => normalizeHotkey(k, o)).filter((k): k is string => k !== null));
-  if (want.size === 0) return false;
+// ---- 連続して押すキー（`G G`）。押したキーの控え。1 つめから 1 秒以内に次を押したときだけつながる ----
+
+/** 連続のキーの、つながる間隔（ms） */
+export const HOTKEY_SEQUENCE_MS = 1000;
+
+type Pressed = { byCode: string; byKey: string | null; at: number };
+let pressedLog: Pressed[] = [];
+/** 控えに入れたイベント（同じイベントを、操作ごとに何度も照合するので、1 回だけ入れる） */
+let loggedEvent: KeyEventLike | null = null;
+/** 連続のキーに当たった直後（次のキーで、控えを空にする。同じイベントの照合は、当たったままにする） */
+let clearLogNext = false;
+
+/** 控えを空にする（試験・フォーカスが外れたとき） */
+export function resetHotkeySequence(): void {
+  pressedLog = [];
+  loggedEvent = null;
+  clearLogNext = false;
+}
+
+function record(e: KeyEventLike, o: Resolved): void {
+  if (e === loggedEvent) return;
+  // 押しっぱなしの繰り返しは、控えに入れない（長押しで `G G` に当たらないように）
+  if ((e as { repeat?: boolean }).repeat) return;
   const byCode = keyFromEvent(e, o, false);
-  if (byCode !== null && want.has(byCode)) return true;
-  if (o.letters === 'key-then-code') {
-    const byKey = keyFromEvent(e, o, true);
-    if (byKey !== null && want.has(byKey)) return true;
+  // 修飾キーだけ・変換中は、つながりを切らない
+  if (byCode === null) return;
+  const now = Date.now();
+  if (clearLogNext) {
+    pressedLog = [];
+    clearLogNext = false;
+  }
+  pressedLog = pressedLog.filter((p) => now - p.at <= HOTKEY_SEQUENCE_MS).slice(-7);
+  pressedLog.push({ byCode, byKey: o.letters === 'key-then-code' ? keyFromEvent(e, o, true) : null, at: now });
+  loggedEvent = e;
+}
+
+function matches(e: KeyEventLike, keys: readonly string[], o: Resolved, sequences: boolean): boolean {
+  if (sequences) record(e, o);
+  const want = keys.map((k) => normalizeHotkey(k, o)).filter((k): k is string => k !== null);
+  if (want.length === 0) return false;
+  const single = new Set(want.filter((k) => !k.includes(' ')));
+  const byCode = keyFromEvent(e, o, false);
+  if (byCode !== null && single.has(byCode)) return true;
+  const byKey = o.letters === 'key-then-code' ? keyFromEvent(e, o, true) : null;
+  if (byKey !== null && single.has(byKey)) return true;
+  // 連続のキー: 控えの終わりが、このイベントのキー
+  if (!sequences || loggedEvent !== e) return false;
+  for (const w of want) {
+    if (!w.includes(' ')) continue;
+    const parts = w.split(' ');
+    const tail = pressedLog.slice(-parts.length);
+    if (tail.length === parts.length && tail.every((p, i) => p.byCode === parts[i] || p.byKey === parts[i])) {
+      clearLogNext = true;
+      return true;
+    }
   }
   return false;
 }
 
+/**
+ * イベントが、ホットキーのどれかに当たるか（letters: 'key-then-code' のときは、押した文字でも位置でも当たる）。
+ * 連続のキー（`G G`）は、直前までに押したキー（この関数が見たもの）とつないで当てる
+ */
+export function matchesHotkey(e: KeyEventLike, keys: readonly string[], opts?: HotkeyOptions): boolean {
+  return matches(e, keys, resolve(opts), true);
+}
+
 const SHOWN: Record<string, string> = { Mod: 'Ctrl', Mouse4: 'マウス戻る', Mouse5: 'マウス進む', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Escape: 'Esc', ' ': 'Space' };
 
-/** 画面に出す形（`Alt+ArrowLeft` → `Alt+←`。`Mod` は `Ctrl`） */
+/** 画面に出す形（`Alt+ArrowLeft` → `Alt+←`。`Mod` は `Ctrl`。連続のキーは `G → G`） */
 export function formatHotkey(text: string): string {
   return text
-    .split('+')
-    .map((p) => SHOWN[p] ?? p)
-    .join('+');
+    .split(' ')
+    .map((chord) =>
+      chord
+        .split('+')
+        .map((p) => SHOWN[p] ?? p)
+        .join('+'),
+    )
+    .join(' → ');
 }
 
 /** 修飾キー（Ctrl・Alt、separate のときは Meta）を含まないか。文字を打っている途中（入力欄）では、このようなホットキーは働かせない */
 export function isPlainHotkey(text: string, opts?: HotkeyOptions): boolean {
   const n = normalizeHotkey(text, opts);
   if (n === null) return false;
-  const mods = n.split('+').slice(0, -1);
+  // 連続のキーは、1 つめで決める
+  const mods = n.split(' ')[0].split('+').slice(0, -1);
   return !mods.some((m) => m === 'Ctrl' || m === 'Alt' || m === 'Meta' || m === (opts?.ctrl ?? 'Ctrl'));
 }
 
@@ -151,5 +226,8 @@ export function worksWhileTyping(text: string, opts?: HotkeyOptions & { function
 
 /** Shift を押していても、押していないものとして当てる（矢印: Shift を押しながらは、選びに足す） */
 export function matchesIgnoringShift(e: KeyEventLike, keys: readonly string[], opts?: HotkeyOptions): boolean {
-  return matchesHotkey({ ...e, shiftKey: false }, keys, opts);
+  // 連続のキーは、見ない（控えにも入れない。矢印の 4 方向を続けて照合するので、入れると重なる）
+  // プロパティを 1 つずつ写す（本物の KeyboardEvent は、展開（...e）しても、プロトタイプの値が写らない）
+  const copy: KeyEventLike = { key: e.key, code: e.code, isComposing: e.isComposing, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, shiftKey: false };
+  return matches(copy, keys, resolve(opts), false);
 }

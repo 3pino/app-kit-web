@@ -39,7 +39,8 @@
 | `plus` | `'literal'` | `'Plus'` にすると `+` キーを `Plus` と書く（`Ctrl+Plus`）。既定は `Ctrl++` |
 
 - `worksWhileTyping(text, { functionKeys?, …HotkeyOptions })`: 入力欄で文字を打っている間に働かせてよいか。Ctrl・Alt・（separate のとき）Meta を含むものは働く。`functionKeys: true` なら F1〜F24 も働く。
-- `HotkeySettings` の `hotkeys`（同じ決まり）と `options`（`mouse`・`escapeCancels`・`labels`・`conflictText`。既定は v0.3.0 までの文言・動き）。`groups` を省くと節を作らず一列に出す。`HotkeyItem` は `description`・`icon` を持てる。`rowExtra`（Snippet）は、操作の行の下に操作ごとの内容を足す（アプリ固有の編集などに使う）。
+- `HotkeySettings` の `hotkeys`（同じ決まり）と `options`（`mouse`・`escapeCancels`・`labels`・`conflictText`・`sequences`・`search`。既定は v0.3.0 までの文言・動き）。
+- **連続して押すキー**（`G G`・`Ctrl+K Ctrl+C`）: `normalizeHotkey` は空白区切りの連続を扱う。`matchesHotkey` は、直前までに押したキー（この関数が見たイベント。同じイベントは 1 回と数える・押しっぱなしの繰り返しと修飾キーだけは数えない）を 1 秒（`HOTKEY_SEQUENCE_MS`）以内でつないで当てる。当たったあとは控えを空にする（`resetHotkeySequence` でも空にできる）。`matchesIgnoringShift` は連続を見ない。表示は `G → G`。この照合を通すイベントは、使う側で、すべてのキー押しをこの関数に通すこと（読まれなかった押しは控えに入らない）。`findConflicts` は、`G` と `G G` のような「1 回のキーと連続の 1 つめ」も重なりとする。`HotkeySettings` の `options.sequences` を真にすると、キーの記録で連続も記録できる（1 つめのあと 0.7 秒待つ）。`options.search` を真にすると、一覧の上に、操作の名前・説明・キーで絞る検索欄を出す。`groups` を省くと節を作らず一列に出す。`HotkeyItem` は `description`・`icon` を持てる。`rowExtra`（Snippet）は、操作の行の下に操作ごとの内容を足す（アプリ固有の編集などに使う）。
 - 既定から変わった点（v0.4.0）: `overrideOf` は並びの比べ方で書き方の違いも同じとみなす（`['ctrl+t']` と `['Ctrl+T']` は同じ）。`removeKey` は書き方が違っても同じキーを外す。`isPlainHotkey`・`matchesHotkey` などの結果は既定では変わらない。
 | `index` | 上の全部を 1 つから読む（`@3pino/app-kit-web/core`） | 個別に読むほうが依存が小さい |
 

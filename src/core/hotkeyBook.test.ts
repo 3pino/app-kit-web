@@ -75,6 +75,22 @@ describe('HotkeyOptions を渡したとき（アプリの決まり）', () => {
   });
 });
 
+describe('連続のキー（G G）の重なり', () => {
+  it('1 回のキーが、連続のキーの 1 つめと同じなら重なり。連続のキー同士は、同じ 1 つめでも重なりとしない。同じ連続は重なり', () => {
+    const cs: HotkeyCommand[] = [
+      { id: 'a', defaults: ['G'] },
+      { id: 'b', defaults: ['g g'] },
+      { id: 'c', defaults: ['G T'] },
+      { id: 'd', defaults: ['x y'] },
+      { id: 'e', defaults: ['X Y'] },
+    ];
+    const c = findConflicts(cs, {});
+    expect(c.get('G')).toEqual(['a', 'b', 'c']);
+    expect(c.get('G G')).toBeUndefined();
+    expect(c.get('X Y')).toEqual(['d', 'e']);
+  });
+});
+
 describe('既定のときの removeKey（書き方の違いも外す）', () => {
   it('同じキーを、書き方が違っても外す', () => {
     expect(removeKey(['Ctrl+T', 'F2'], 'ctrl+t')).toEqual(['F2']);

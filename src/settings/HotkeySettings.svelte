@@ -25,6 +25,10 @@
       reset?: (name: string) => string;
       remove?: (name: string, key: string) => string;
     };
+    /** 連続して押すキー（`G G`）を記録できるか（既定 false。true のときは、1 つめのキーのあと 0.7 秒、次のキーを待つ。次を押すとつながり、押さなければ 1 回のキーとして記録する。使う側の照合は core/hotkeys の matchesHotkey） */
+    sequences?: boolean;
+    /** 一覧の上に、操作の名前・説明・キーで絞る検索欄を出すか（既定 false。絞っているあいだは、節をすべて開く） */
+    search?: boolean;
     /** 重なりの警告の文（clashes は、この操作のキーごとに、ぶつかっている操作の名前）。省くと既定の文 */
     conflictText?: (clashes: { key: string; names: string[] }[]) => string;
   }
@@ -38,11 +42,12 @@
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
   import X from '@lucide/svelte/icons/x';
   import Divider from '@3pino/ui-kit-web/Divider.svelte';
+  import TextInput from '@3pino/ui-kit-web/TextInput.svelte';
   import IconButton from '@3pino/ui-kit-web/IconButton.svelte';
   import SettingRow from '@3pino/ui-kit-web/SettingRow.svelte';
   import StatusLine from '@3pino/ui-kit-web/StatusLine.svelte';
   import type { Snippet } from 'svelte';
-  import { formatHotkey, hotkeyFromEvent, hotkeyFromMouse, type HotkeyOptions } from '../core/hotkeys';
+  import { formatHotkey, hotkeyFromEvent, hotkeyFromMouse, normalizeHotkey, type HotkeyOptions } from '../core/hotkeys';
 
   // 設定の「ホットキー」の画面: 操作ごとに、キーを複数決められる（追加・外す・既定に戻す）。
   // 何があるか（commands・groups）と、いまのキー・保存（keys・isCustom・add・remove・reset）は、使う側が渡す（保存先・既定は、アプリの決まり）。
@@ -100,8 +105,36 @@
     options?.conflictText?.(clashes) ??
     `同じキーが、ほかの操作にもあります: ${clashes.map((c) => `${formatHotkey(c.key)}（${c.names.join('・')}）`).join('、')}`;
 
+  const sequencesOn = $derived(options?.sequences ?? false);
+  const searchOn = $derived(options?.search ?? false);
+  /** 連続のキーの、次のキーを待つ時間（ms）。つながる間隔（HOTKEY_SEQUENCE_MS）より短くする */
+  const COMMIT_WAIT_MS = 700;
+
   /** キーを記録している操作 */
   let recording = $state<string | null>(null);
+  /** ここまでに押したキー（連続のキー。次を待っているあいだ） */
+  let pending = $state<string[]>([]);
+  let commitTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** 押したキーを足して、確定する（連続を記録するときは、少し待ってから） */
+  function take(id: string, chord: string, immediate: boolean): void {
+    if (!sequencesOn || immediate) {
+      add(id, [...pending, chord].join(' '));
+      pending = [];
+      recording = null;
+      return;
+    }
+    pending = [...pending, chord];
+    clearTimeout(commitTimer);
+    commitTimer = setTimeout(() => {
+      const text = pending.join(' ');
+      pending = [];
+      if (recording === id) {
+        add(id, text);
+        recording = null;
+      }
+    }, COMMIT_WAIT_MS);
+  }
 
   function onRecordKey(e: KeyboardEvent): void {
     const id = recording;
@@ -116,8 +149,7 @@
     const text = hotkeyFromEvent(e, hotkeys);
     // 修飾キーだけのときは、続けて押すキーを待つ
     if (!text) return;
-    add(id, text);
-    recording = null;
+    take(id, text, false);
   }
 
   function onRecordMouse(e: MouseEvent): void {
@@ -127,15 +159,19 @@
     if (!text) return;
     e.preventDefault();
     e.stopPropagation();
-    add(id, text);
-    recording = null;
+    // マウスのボタンで、すぐに確定する
+    take(id, text, true);
   }
 
   $effect(() => {
     const on = recording !== null;
     // 知らせる処理は、使う側の状態を書く。この効果の依存にしない
     untrack(() => onrecording?.(on));
-    if (!on) return;
+    if (!on) {
+      clearTimeout(commitTimer);
+      untrack(() => (pending = []));
+      return;
+    }
     window.addEventListener('keydown', onRecordKey, true);
     if (mouseOn) window.addEventListener('mouseup', onRecordMouse, true);
     return () => {
@@ -143,13 +179,25 @@
       if (mouseOn) window.removeEventListener('mouseup', onRecordMouse, true);
     };
   });
-  onDestroy(() => onrecording?.(false));
+  onDestroy(() => {
+    clearTimeout(commitTimer);
+    onrecording?.(false);
+  });
 
   /** 開いている節 */
   let opened = $state<Record<string, boolean>>({});
 
+  // 検索: 名前・説明・キー（「ctrl」「→」など、画面に出す形でも、書いた形でも）に、空白で区切った語すべてを含むもの
+  let query = $state('');
+  const needles = $derived(query.trim().toLowerCase().split(/\s+/).filter(Boolean));
+  const filtering = $derived(searchOn && needles.length > 0);
+  function haystack(c: HotkeyItem): string {
+    const ks = keys(c.id).flatMap((k) => [k, formatHotkey(k), normalizeHotkey(k, hotkeys) ?? '']);
+    return [c.name, c.description ?? '', ...ks].join('\n').toLowerCase();
+  }
+  const shown = $derived(filtering ? commands.filter((c) => needles.every((n) => haystack(c).includes(n))) : commands);
   const sections = $derived(
-    groups ? groups.map((g) => ({ title: g, commands: commands.filter((c) => c.group === g) })).filter((s) => s.commands.length > 0) : [],
+    groups ? groups.map((g) => ({ title: g, commands: shown.filter((c) => c.group === g) })).filter((s) => s.commands.length > 0) : [],
   );
   const nameOf = (id: string): string => allNames?.(id) ?? commands.find((c) => c.id === id)?.name ?? id;
 
@@ -178,7 +226,7 @@
           <span class="muted hotkey-none">なし</span>
         {/each}
         {#if recording === c.id}
-          <span class="hotkey-recording" role="status">キーを押してください…</span>
+          <span class="hotkey-recording" role="status">{pending.length > 0 ? `${formatHotkey(pending.join(' '))} → …` : 'キーを押してください…'}</span>
         {/if}
         <IconButton
           class="hotkey-reset"
@@ -207,13 +255,22 @@
   </div>
 {/snippet}
 
+{#if searchOn}
+  <div class="hotkey-search">
+    <TextInput type="search" bind:value={query} placeholder="操作やキーで検索" aria-label="ホットキーを検索" autocomplete="off" spellcheck={false} />
+  </div>
+  {#if filtering && shown.length === 0}
+    <p class="muted hotkey-no-hit">見つかりません</p>
+  {/if}
+{/if}
+
 {#if groups}
   {#each sections as section (section.title)}
-    {@const isOpen = opened[section.title] === true}
+    {@const isOpen = filtering || opened[section.title] === true}
     <section class="setting-section">
       <Divider class="setting-section-divider" />
       <h2 class="setting-section-title hotkey-group-title">
-        <button type="button" class="hotkey-group-toggle" aria-expanded={isOpen} onclick={() => (opened[section.title] = !isOpen)}>
+        <button type="button" class="hotkey-group-toggle" aria-expanded={isOpen} onclick={() => (opened[section.title] = !(opened[section.title] === true))} disabled={filtering}>
           <ChevronRight size={16} class={isOpen ? 'hotkey-group-chevron hotkey-group-chevron-open' : 'hotkey-group-chevron'} />
           {section.title}
           <span class="muted hotkey-group-count">{section.commands.length}</span>
@@ -227,12 +284,18 @@
     </section>
   {/each}
 {:else}
-  {#each commands as c (c.id)}
+  {#each shown as c (c.id)}
     {@render row(c)}
   {/each}
 {/if}
 
 <style>
+  .hotkey-search {
+    padding: var(--space-3) 0;
+  }
+  .hotkey-no-hit {
+    padding: var(--space-3) 0;
+  }
   .hotkey-group-title {
     margin: 0;
   }

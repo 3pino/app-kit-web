@@ -60,7 +60,10 @@ export function effectiveKeys<Id extends string>(commands: readonly HotkeyComman
   return over[id] ?? commands.find((c) => c.id === id)?.defaults ?? [];
 }
 
-/** 同じキーを持つ操作（キー → 操作の ID の並び。2 つ以上のものだけ） */
+/**
+ * 同じキーを持つ操作（キー → 操作の ID の並び。2 つ以上のものだけ）。
+ * 連続のキー（`G G`）の 1 つめと、同じ 1 回のキー（`G`）も、重なりとする（`G` が先に動いてしまう。連続のキー同士は、重なりとしない）
+ */
 export function findConflicts<Id extends string>(commands: readonly HotkeyCommand<Id>[], over: Overrides<Id>, opts?: HotkeyOptions): Map<string, Id[]> {
   const by = new Map<string, Id[]>();
   for (const c of commands) {
@@ -68,6 +71,14 @@ export function findConflicts<Id extends string>(commands: readonly HotkeyComman
       const n = normalizeHotkey(k, opts) ?? k;
       by.set(n, [...(by.get(n) ?? []), c.id]);
     }
+  }
+  // 1 回のキーが、連続のキーの 1 つめと同じ
+  for (const [k, ids] of [...by]) {
+    if (!k.includes(' ')) continue;
+    const first = k.split(' ')[0];
+    const owners = by.get(first);
+    if (!owners) continue;
+    by.set(first, [...new Set([...owners, ...ids])]);
   }
   for (const [k, ids] of [...by]) if (ids.length < 2) by.delete(k);
   return by;

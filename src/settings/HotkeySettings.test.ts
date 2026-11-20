@@ -237,3 +237,131 @@ describe('HotkeySettings の選び方', () => {
 });
 
 type HotkeyItemLike = { id: string };
+
+// ---- 連続して押すキーの記録・検索欄 ----
+
+describe('HotkeySettings: sequences・search', () => {
+  const items = [
+    { id: 'new', name: '新規', description: '文書を作る', group: 'ファイル' },
+    { id: 'close', name: '閉じる', group: 'ファイル' },
+    { id: 'back', name: '戻る', group: '移動' },
+  ];
+  function mountWith(options: Record<string, unknown>) {
+    const store: Record<string, string[]> = { new: ['Ctrl+N'], close: ['Ctrl+W'], back: ['Alt+ArrowLeft'] };
+    const spy = { add: vi.fn() };
+    instance = mount(HotkeySettings, {
+      target: document.body,
+      props: {
+        commands: items,
+        groups: ['ファイル', '移動'],
+        keys: (id: string) => store[id] ?? [],
+        isCustom: () => false,
+        conflicts: new Map(),
+        add: (id: string, k: string) => {
+          spy.add(id, k);
+          store[id] = [...(store[id] ?? []), k];
+        },
+        remove: vi.fn(),
+        reset: vi.fn(),
+        options,
+      },
+    });
+    flushSync();
+    return { spy };
+  }
+  const press = (k: string, code = `Key${k.toUpperCase()}`): void => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: k, code, bubbles: true, cancelable: true }));
+  };
+  const type = async (el: HTMLInputElement, text: string): Promise<void> => {
+    el.value = text;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+  };
+
+  it('sequences: キーを続けて押すと、つないで0.7 秒後に 1 つとして記録する。表示は、つながったところまでを出す', async () => {
+    vi.useFakeTimers();
+    try {
+      const { spy } = mountWith({ sequences: true });
+      document.querySelector<HTMLElement>('.hotkey-group-toggle')!.click();
+      await flush();
+      document.querySelector<HTMLElement>('button[aria-label="新規のキーを追加"]')!.click();
+      await flush();
+      press('g');
+      await flush();
+      expect(spy.add).not.toHaveBeenCalled();
+      expect(document.querySelector('[data-command="new"] .hotkey-recording')!.textContent).toContain('G → …');
+      vi.advanceTimersByTime(300);
+      press('g');
+      await flush();
+      expect(document.querySelector('[data-command="new"] .hotkey-recording')!.textContent).toContain('G → G → …');
+      vi.advanceTimersByTime(800);
+      await flush();
+      expect(spy.add).toHaveBeenCalledWith('new', 'G G');
+      expect(document.querySelector('[data-command="new"] .hotkey-recording')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sequences: 1 回だけ押して待つと、1 回のキーとして記録する。この間に他を押してフォーカスが外れると、記録しない。マウスはすぐ確定', async () => {
+    vi.useFakeTimers();
+    try {
+      const { spy } = mountWith({ sequences: true });
+      document.querySelector<HTMLElement>('.hotkey-group-toggle')!.click();
+      await flush();
+      const plus = () => document.querySelector<HTMLElement>('button[aria-label="閉じるのキーを追加"]')!;
+      plus().click();
+      await flush();
+      press('x');
+      vi.advanceTimersByTime(800);
+      await flush();
+      expect(spy.add).toHaveBeenLastCalledWith('close', 'X');
+      plus().click();
+      await flush();
+      press('y');
+      plus().click(); // もう一度押して取り消す
+      await flush();
+      vi.advanceTimersByTime(800);
+      expect(spy.add).toHaveBeenCalledTimes(1);
+      plus().click();
+      await flush();
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 4, bubbles: true, cancelable: true }));
+      expect(spy.add).toHaveBeenLastCalledWith('close', 'Mouse5');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sequences を渡さなければ、これまでどおり、押したときにすぐ記録する', async () => {
+    const { spy } = mountWith({});
+    document.querySelector<HTMLElement>('.hotkey-group-toggle')!.click();
+    await flush();
+    document.querySelector<HTMLElement>('button[aria-label="新規のキーを追加"]')!.click();
+    await flush();
+    press('g');
+    expect(spy.add).toHaveBeenCalledWith('new', 'G');
+  });
+
+  it('search: を渡さないと検索欄は出ない。あるとき、名前・説明・キー（画面の形も）で絞り、絞っているあいだは節をすべて開く', async () => {
+    mountWith({});
+    expect(document.querySelector('.hotkey-search')).toBeNull();
+    await unmount(instance!);
+    document.body.innerHTML = '';
+    mountWith({ search: true });
+    const input = document.querySelector<HTMLInputElement>('.hotkey-search input')!;
+    expect(document.querySelectorAll('[data-command]')).toHaveLength(0); // 節は折りたたみ
+    await type(input, '戻');
+    expect([...document.querySelectorAll('[data-command]')].map((e) => (e as HTMLElement).dataset.command)).toEqual(['back']);
+    await type(input, 'ctrl');
+    expect([...document.querySelectorAll('[data-command]')].map((e) => (e as HTMLElement).dataset.command)).toEqual(['new', 'close']);
+    await type(input, '←'); // 画面に出す形（Alt+←）
+    expect([...document.querySelectorAll('[data-command]')].map((e) => (e as HTMLElement).dataset.command)).toEqual(['back']);
+    await type(input, 'ctrl 作る'); // 語を組み合わせる（すべてを含む）
+    expect([...document.querySelectorAll('[data-command]')].map((e) => (e as HTMLElement).dataset.command)).toEqual(['new']);
+    await type(input, 'ない言葉');
+    expect(document.querySelector('.hotkey-no-hit')?.textContent).toContain('見つかりません');
+    await type(input, '');
+    expect(document.querySelectorAll('[data-command]')).toHaveLength(0);
+    expect(document.querySelector('.hotkey-no-hit')).toBeNull();
+  });
+});

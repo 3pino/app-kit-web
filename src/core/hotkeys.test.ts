@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { worksWhileTyping } from './hotkeys';
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetHotkeySequence, worksWhileTyping } from './hotkeys';
 import { formatHotkey, hotkeyFromEvent, hotkeyFromMouse, isPlainHotkey, matchesHotkey, matchesIgnoringShift, matchesMouse, normalizeHotkey } from './hotkeys';
 
 const ev = (key: string, init: Partial<Parameters<typeof hotkeyFromEvent>[0]> = {}) => ({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...init });
@@ -58,6 +59,11 @@ describe('matchesIgnoringShift', () => {
     expect(matchesIgnoringShift(ev('ArrowUp', { shiftKey: true }), ['ArrowUp'])).toBe(true);
     expect(matchesIgnoringShift(ev('ArrowUp'), ['ArrowUp'])).toBe(true);
     expect(matchesIgnoringShift(ev('ArrowUp', { ctrlKey: true }), ['ArrowUp'])).toBe(false);
+  });
+  it('本物の KeyboardEvent（値がプロトタイプにある）でも、同じように当たる', () => {
+    const real = new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp', shiftKey: true });
+    expect(matchesIgnoringShift(real, ['ArrowUp'])).toBe(true);
+    expect(matchesIgnoringShift(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', ctrlKey: true }), ['Ctrl+A'])).toBe(true);
   });
 });
 
@@ -162,5 +168,89 @@ describe('HotkeyOptions: 全部そろえた場合（アプリの決まり）', (
     expect(normalizeHotkey(t!, DISNANS)).toBe(t);
     expect(hotkeyFromEvent(ev(' ', { altKey: true, code: 'Space' }), DISNANS)).toBe('Alt+Space');
     expect(hotkeyFromEvent(ev('Escape', { code: 'Escape' }), DISNANS)).toBe('Escape');
+  });
+});
+
+describe('連続して押すキー（G G）', () => {
+  const key = (k: string, init: Partial<Parameters<typeof hotkeyFromEvent>[0]> & { repeat?: boolean } = {}) => ev(k, { code: `Key${k.toUpperCase()}`, ...init });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    resetHotkeySequence();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('書き方は、空白で区切る。そろえると、各キーの形・空白 1 つ。`+` の周りの空白は無いものとする', () => {
+    expect(normalizeHotkey('g g')).toBe('G G');
+    expect(normalizeHotkey('  ctrl+k   CTRL+c ')).toBe('Ctrl+K Ctrl+C');
+    expect(normalizeHotkey('Ctrl + T')).toBe('Ctrl+T');
+    expect(normalizeHotkey('Ctrl++')).toBe('Ctrl++');
+    expect(normalizeHotkey('g bogus+')).toBeNull();
+    expect(normalizeHotkey('   ')).toBeNull();
+  });
+
+  it('画面には G → G と出す。修飾キーを含まない 1 つ目で、入力欄の中で働くかを決める', () => {
+    expect(formatHotkey('G G')).toBe('G → G');
+    expect(formatHotkey('Ctrl+K Alt+ArrowLeft')).toBe('Ctrl+K → Alt+←');
+    expect(isPlainHotkey('G G')).toBe(true);
+    expect(isPlainHotkey('Ctrl+K G')).toBe(false);
+    expect(isPlainHotkey('G Ctrl+K')).toBe(true);
+  });
+
+  it('1 秒以内に続けて押すと当たる。1 つ目だけ・時間が空いたときは当たらない', () => {
+    expect(matchesHotkey(key('g'), ['G G'])).toBe(false);
+    vi.advanceTimersByTime(300);
+    expect(matchesHotkey(key('g'), ['G G'])).toBe(true);
+    // 時間が空く
+    resetHotkeySequence();
+    expect(matchesHotkey(key('g'), ['G G'])).toBe(false);
+    vi.advanceTimersByTime(1500);
+    expect(matchesHotkey(key('g'), ['G G'])).toBe(false);
+  });
+
+  it('当たったあとは、控えを空にする（3 回目で、もう一度は当たらない）。ほかのキーを挟むと当たらない', () => {
+    matchesHotkey(key('g'), ['G G']);
+    expect(matchesHotkey(key('g'), ['G G'])).toBe(true);
+    expect(matchesHotkey(key('g'), ['G G'])).toBe(false);
+    expect(matchesHotkey(key('g'), ['G G'])).toBe(true);
+    resetHotkeySequence();
+    matchesHotkey(key('g'), ['G G']);
+    matchesHotkey(key('x'), ['G G']);
+    expect(matchesHotkey(key('g'), ['G G'])).toBe(false);
+  });
+
+  it('同じイベントを、操作ごとに何度照合しても 1 回の押しとして数える。当たったあとも、同じイベントでは当たったまま', () => {
+    matchesHotkey(key('g'), ['G G']);
+    const second = key('g');
+    expect(matchesHotkey(second, ['X'])).toBe(false);
+    expect(matchesHotkey(second, ['G G'])).toBe(true);
+    expect(matchesHotkey(second, ['G G'])).toBe(true);
+  });
+
+  it('押しっぱなしの繰り返し（repeat）・修飾キーだけの押しは、数えない（当たりもしない）', () => {
+    matchesHotkey(key('g'), ['G G']);
+    expect(matchesHotkey(key('g', { repeat: true }), ['G G'])).toBe(false);
+    expect(matchesHotkey(ev('Shift', { shiftKey: true }), ['G G'])).toBe(false);
+    expect(matchesHotkey(key('g'), ['G G'])).toBe(true);
+    // 当たったあとの、修飾キーだけの押しで、もう一度当たらない
+    expect(matchesHotkey(ev('Shift', { shiftKey: true }), ['G G'])).toBe(false);
+  });
+
+  it('1 回のキーと連続のキーを両方持てる。矢印の照合（Shift 無視）は、控えに入れない', () => {
+    expect(matchesHotkey(key('h'), ['H', 'G G'])).toBe(true);
+    resetHotkeySequence();
+    const up = ev('ArrowUp', { code: 'ArrowUp' });
+    expect(matchesIgnoringShift(up, ['ArrowUp'])).toBe(true);
+    expect(matchesIgnoringShift(up, ['ArrowUp'])).toBe(true);
+    matchesHotkey(key('g'), ['G G']);
+    expect(matchesHotkey(key('g'), ['G G'])).toBe(true);
+  });
+
+  it('3 つの連続・修飾キーつきの連続も当たる', () => {
+    const k = (c: string) => ev(c, { code: `Key${c.toUpperCase()}`, ctrlKey: true });
+    expect(matchesHotkey(k('k'), ['Ctrl+K Ctrl+C Ctrl+D'])).toBe(false);
+    expect(matchesHotkey(k('c'), ['Ctrl+K Ctrl+C Ctrl+D'])).toBe(false);
+    expect(matchesHotkey(k('d'), ['Ctrl+K Ctrl+C Ctrl+D'])).toBe(true);
   });
 });
