@@ -17,3 +17,5 @@ export * from './zoomGesture';
 export * from './backNav';
 export * from './swipe';
 export * from './pasteSource';
+export * from './hotkeys';
+export * from './hotkeyBook';

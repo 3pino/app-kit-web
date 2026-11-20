@@ -43,7 +43,7 @@ MIT（[LICENSE](LICENSE)）。
 ## v0.2.0 で増えたもの
 
 - `@3pino/app-kit-web/updater`: アップデートの状態の機械（`Updater`）・判定（`updateCheck`）・状態の型。仕組みへの口は `UpdateBackend`（アプリが作る。Tauri のアップデーターや APK の取得）。
-- `@3pino/app-kit-web/settings`: 設定の 1 項目の部品（`SettingsField.svelte`）と、項目の決まり（`SettingBinding`・`SettingControl`）。読み書きはアプリが渡す。
+- `@3pino/app-kit-web/settings`: 設定の 1 項目の部品（`SettingsField.svelte`）と、項目の決まり（`SettingBinding`・`SettingControl`）。読み書きはアプリが渡す。ホットキーの画面（`HotkeySettings.svelte`。節の折りたたみ・キーの記録（マウスの戻る／進むも）・外す・既定に戻す・重なりの警告）。操作の一覧・いまのキー・保存は props で渡す（決まりは `core/hotkeyBook`）。
 - `@3pino/app-kit-web/core/dropFiles`: OS のドロップ（Linux・Windows のネイティブのパス）の部品。Tauri の呼び出しは必要になったときに読む（peer の `@tauri-apps/api`・`@tauri-apps/plugin-fs`）。
 
 Rust 側の共有の設計は [docs/tauri-kit-design.md](docs/tauri-kit-design.md)（コードは未移動）。

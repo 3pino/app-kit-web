@@ -24,6 +24,8 @@
 | `swipe` | 横のスワイプの判定（`swipeOffset`・`swipeTriggered`・`atScrollEnd`） | `@3pino/ui-kit-web/gesture` を使う |
 | `backNav` | 戻る操作（Android の戻る・Alt+←）を、アプリの `back()` へつなぐ | 履歴の深さも渡す |
 | `pasteSource` | 貼り付けの経路（Android の notifier か、Linux のネイティブか）を 1 回読んで返す | `platform` を使う |
+| `hotkeys` | ホットキーの文字（`Ctrl+Shift+Tab`・マウスの戻る／進む `Mouse4`／`Mouse5`）と、キー・マウスのイベントの対応（`hotkeyFromEvent`・`matchesHotkey`・`normalizeHotkey`・`formatHotkey` など） | — |
+| `hotkeyBook` | 操作ごとの既定と、利用者が変えた分の決まり（`parseOverrides`・`effectiveKeys`・`overrideOf`・`addKey`・`removeKey`・`findConflicts`）。保存先と画面は持たない（アプリが `Overrides` を読み書きする） | `settings/HotkeySettings.svelte` が画面 |
 | `index` | 上の全部を 1 つから読む（`@3pino/app-kit-web/core`） | 個別に読むほうが依存が小さい |
 
 ## アプリの接続
