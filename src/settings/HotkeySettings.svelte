@@ -118,7 +118,7 @@
   let pending = $state<string[]>([]);
   let holdTimer: ReturnType<typeof setTimeout> | undefined;
   /** 長押しの判定中の、修飾キーなしの Enter・Esc */
-  let holding: 'Enter' | 'Escape' | null = null;
+  let holding = $state<'Enter' | 'Escape' | null>(null);
   /** 長押しで処理したあと、そのキーを離すまで、記録に入れない */
   let heldDone = false;
 
@@ -328,8 +328,8 @@
       {/each}
     </div>
     <div class="hotkey-rec-actions">
-      <Button onclick={stop}>キャンセル</Button>
-      <Button variant="primary" disabled={pending.length === 0} onclick={finish}>記録終了</Button>
+      <Button class="hotkey-rec-btn {holding === 'Escape' ? 'hotkey-rec-holding' : ''}" onclick={stop}>キャンセル</Button>
+      <Button class="hotkey-rec-btn {holding === 'Enter' ? 'hotkey-rec-holding' : ''}" variant="primary" disabled={pending.length === 0} onclick={finish}>記録終了</Button>
     </div>
   </Modal>
 {/if}
@@ -452,6 +452,25 @@
     justify-content: flex-end;
     gap: var(--space-2);
     margin-top: var(--space-3);
+  }
+  /* Enter・Esc を長押ししている間、対応するボタンが左から徐々に明るくなる（押し続ける時間は HOLD_MS） */
+  .hotkey-rec-actions :global(.hotkey-rec-btn) {
+    position: relative;
+    overflow: hidden;
+  }
+  .hotkey-rec-actions :global(.hotkey-rec-holding)::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 0;
+    background: color-mix(in oklab, #fff 38%, transparent);
+    pointer-events: none;
+    animation: hotkey-rec-fill 600ms linear forwards;
+  }
+  @keyframes hotkey-rec-fill {
+    to {
+      width: 100%;
+    }
   }
   .hotkey-none,
   .hotkey-recording {

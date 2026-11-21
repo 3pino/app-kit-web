@@ -348,8 +348,11 @@ describe('HotkeySettings: sequences・search', () => {
       keyup('Enter');
       await flush();
       expect(seq()).toEqual(['K', 'Enter']);
-      // 長い Enter: 確定
+      // 長い Enter: 確定（押している間は、「記録終了」が左から明るくなるアニメーション。離せば止まる）
       press('Enter', 'Enter');
+      await flush();
+      const buttons = [...document.querySelectorAll('.hotkey-rec-btn')];
+      expect(buttons.map((b) => b.classList.contains('hotkey-rec-holding'))).toEqual([false, true]);
       for (let i = 0; i < 5; i++) {
         vi.advanceTimersByTime(150);
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat: true, bubbles: true, cancelable: true }));
