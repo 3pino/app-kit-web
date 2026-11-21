@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetHotkeySequence, worksWhileTyping } from './hotkeys';
+import { registerHotkeySequences, resetHotkeySequence, worksWhileTyping } from './hotkeys';
 import { formatHotkey, hotkeyFromEvent, hotkeyFromMouse, isPlainHotkey, matchesHotkey, matchesIgnoringShift, matchesMouse, normalizeHotkey } from './hotkeys';
 
 const ev = (key: string, init: Partial<Parameters<typeof hotkeyFromEvent>[0]> = {}) => ({ key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...init });
@@ -245,6 +245,30 @@ describe('連続して押すキー（G G）', () => {
     expect(matchesIgnoringShift(up, ['ArrowUp'])).toBe(true);
     matchesHotkey(key('g'), ['G G']);
     expect(matchesHotkey(key('g'), ['G G'])).toBe(true);
+  });
+
+  it('`H` と `G H` の両方があるとき、G のあとの H は `G H` が先（`H` は働かない）。単独の H は `H`', () => {
+    registerHotkeySequences(['H', 'G H', 'Ctrl+K']);
+    try {
+      // 1 つ目が G のときだけ、連続を優先する。どの操作が先に照合されても、結果は同じ
+      matchesHotkey(key('g'), ['G H']);
+      const h = key('h');
+      expect(matchesHotkey(h, ['H'])).toBe(false);
+      expect(matchesHotkey(h, ['G H'])).toBe(true);
+      expect(matchesHotkey(h, ['H'])).toBe(false);
+      // 時間が空けば、ふつうの H
+      resetHotkeySequence();
+      matchesHotkey(key('g'), ['G H']);
+      vi.advanceTimersByTime(1500);
+      expect(matchesHotkey(key('h'), ['H'])).toBe(true);
+      // G を押さずに H
+      resetHotkeySequence();
+      const h2 = key('h');
+      expect(matchesHotkey(h2, ['H'])).toBe(true);
+      expect(matchesHotkey(h2, ['G H'])).toBe(false);
+    } finally {
+      registerHotkeySequences([]);
+    }
   });
 
   it('3 つの連続・修飾キーつきの連続も当たる', () => {

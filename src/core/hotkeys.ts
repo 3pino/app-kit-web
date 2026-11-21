@@ -159,27 +159,49 @@ function record(e: KeyEventLike, o: Resolved): void {
   loggedEvent = e;
 }
 
+/** アプリ全体の、連続のキー（`G H`）の一覧。1 回のキー（`H`）より先に当てるために、使う側が登録する */
+let registeredSequences: string[] = [];
+
+/**
+ * アプリで使っているキーのうち、連続のもの（空白を含むもの）を登録する。
+ * 登録した連続のキーに、いま押したキーでつながるとき（`G` のあとの `H`）は、同じキーの 1 回のキー（`H`）には当てない。
+ * 設定が変わるたびに、全部を渡し直す（空のものは無視する）
+ */
+export function registerHotkeySequences(keys: readonly string[]): void {
+  registeredSequences = keys.filter((k) => k.includes(' '));
+}
+
+function tailMatches(w: string): boolean {
+  const parts = w.split(' ');
+  const tail = pressedLog.slice(-parts.length);
+  return tail.length === parts.length && tail.every((p, i) => p.byCode === parts[i] || p.byKey === parts[i]);
+}
+
 function matches(e: KeyEventLike, keys: readonly string[], o: Resolved, sequences: boolean): boolean {
   if (sequences) record(e, o);
   const want = keys.map((k) => normalizeHotkey(k, o)).filter((k): k is string => k !== null);
   if (want.length === 0) return false;
+  // 連続のキー: 控えの終わりが、このイベントのキー。1 回のキーより先に調べる
+  if (sequences && loggedEvent === e) {
+    for (const w of want) {
+      if (w.includes(' ') && tailMatches(w)) {
+        clearLogNext = true;
+        return true;
+      }
+    }
+  }
+  // 登録した連続のキーにつながるなら、1 回のキーには当てない（`G H` を押したとき、`H` は働かない）
+  if (sequences && loggedEvent === e) {
+    for (const r of registeredSequences) {
+      const n = normalizeHotkey(r, o);
+      if (n !== null && tailMatches(n)) return false;
+    }
+  }
   const single = new Set(want.filter((k) => !k.includes(' ')));
   const byCode = keyFromEvent(e, o, false);
   if (byCode !== null && single.has(byCode)) return true;
   const byKey = o.letters === 'key-then-code' ? keyFromEvent(e, o, true) : null;
-  if (byKey !== null && single.has(byKey)) return true;
-  // 連続のキー: 控えの終わりが、このイベントのキー
-  if (!sequences || loggedEvent !== e) return false;
-  for (const w of want) {
-    if (!w.includes(' ')) continue;
-    const parts = w.split(' ');
-    const tail = pressedLog.slice(-parts.length);
-    if (tail.length === parts.length && tail.every((p, i) => p.byCode === parts[i] || p.byKey === parts[i])) {
-      clearLogNext = true;
-      return true;
-    }
-  }
-  return false;
+  return byKey !== null && single.has(byKey);
 }
 
 /**

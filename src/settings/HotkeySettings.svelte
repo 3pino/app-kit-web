@@ -25,7 +25,7 @@
       reset?: (name: string) => string;
       remove?: (name: string, key: string) => string;
     };
-    /** 連続して押すキー（`G G`）を記録できるか（既定 false。true のときは、1 つめのキーのあと 0.7 秒、次のキーを待つ。次を押すとつながり、押さなければ 1 回のキーとして記録する。使う側の照合は core/hotkeys の matchesHotkey） */
+    /** 連続して押すキー（`G G`）を記録できるか（既定 false）。true のときは、「＋」でダイアログを開き、押したキーを順に並べて見せる。「記録終了」ボタン（Enter の長押しでも）で確定し、「キャンセル」ボタン（Esc の長押しでも）でやめる。時間では確定しない。使う側の照合は core/hotkeys の matchesHotkey */
     sequences?: boolean;
     /** 一覧の上に、操作の名前・説明・キーで絞る検索欄を出すか（既定 false。絞っているあいだは、節をすべて開く） */
     search?: boolean;
@@ -43,6 +43,8 @@
   import X from '@lucide/svelte/icons/x';
   import Divider from '@3pino/ui-kit-web/Divider.svelte';
   import TextInput from '@3pino/ui-kit-web/TextInput.svelte';
+  import Modal from '@3pino/ui-kit-web/Modal.svelte';
+  import Button from '@3pino/ui-kit-web/Button.svelte';
   import IconButton from '@3pino/ui-kit-web/IconButton.svelte';
   import SettingRow from '@3pino/ui-kit-web/SettingRow.svelte';
   import StatusLine from '@3pino/ui-kit-web/StatusLine.svelte';
@@ -107,34 +109,45 @@
 
   const sequencesOn = $derived(options?.sequences ?? false);
   const searchOn = $derived(options?.search ?? false);
-  /** 連続のキーの、次のキーを待つ時間（ms）。つながる間隔（HOTKEY_SEQUENCE_MS）より短くする */
-  const COMMIT_WAIT_MS = 700;
+  /** Enter・Esc の長押しで、記録を終える・やめるまでの時間（ms） */
+  const HOLD_MS = 600;
 
   /** キーを記録している操作 */
   let recording = $state<string | null>(null);
-  /** ここまでに押したキー（連続のキー。次を待っているあいだ） */
+  /** ここまでに押したキー（連続のキー） */
   let pending = $state<string[]>([]);
-  let commitTimer: ReturnType<typeof setTimeout> | undefined;
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
+  /** 長押しの判定中の、修飾キーなしの Enter・Esc */
+  let holding: 'Enter' | 'Escape' | null = null;
+  /** 長押しで処理したあと、そのキーを離すまで、記録に入れない */
+  let heldDone = false;
 
-  /** 押したキーを足して、確定する（連続を記録するときは、少し待ってから） */
-  function take(id: string, chord: string, immediate: boolean): void {
-    if (!sequencesOn || immediate) {
-      add(id, [...pending, chord].join(' '));
-      pending = [];
+  function stop(): void {
+    clearTimeout(holdTimer);
+    holding = null;
+    heldDone = false;
+    pending = [];
+    recording = null;
+  }
+  /** 記録を確定する（押したキーがあれば） */
+  function finish(): void {
+    const id = recording;
+    const text = pending.join(' ');
+    stop();
+    if (id && text) add(id, text);
+  }
+
+  /** 押したキーを足す。連続のキーを記録しないときは、すぐ確定する */
+  function take(id: string, chord: string): void {
+    if (!sequencesOn) {
+      add(id, chord);
       recording = null;
       return;
     }
     pending = [...pending, chord];
-    clearTimeout(commitTimer);
-    commitTimer = setTimeout(() => {
-      const text = pending.join(' ');
-      pending = [];
-      if (recording === id) {
-        add(id, text);
-        recording = null;
-      }
-    }, COMMIT_WAIT_MS);
   }
+
+  const isPlain = (e: KeyboardEvent): boolean => !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
 
   function onRecordKey(e: KeyboardEvent): void {
     const id = recording;
@@ -142,14 +155,50 @@
     e.preventDefault();
     e.stopPropagation();
     if (e.isComposing || e.keyCode === 229) return;
-    if (escapeCancels && e.key === 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-      recording = null;
+    if (!sequencesOn) {
+      if (escapeCancels && e.key === 'Escape' && isPlain(e)) {
+        recording = null;
+        return;
+      }
+      const text = hotkeyFromEvent(e, hotkeys);
+      if (text) take(id, text);
       return;
     }
+    // 連続のキー: Enter・Esc は、短く押せばキーとして記録し（離したとき）、長く押せば「記録終了」「キャンセル」にする
+    if ((e.key === 'Enter' || e.key === 'Escape') && isPlain(e)) {
+      if (e.repeat || holding !== null || heldDone) return;
+      holding = e.key;
+      holdTimer = setTimeout(() => {
+        heldDone = true;
+        const was = holding;
+        holding = null;
+        if (was === 'Enter') finish();
+        else stop();
+      }, HOLD_MS);
+      return;
+    }
+    // 押しっぱなしの繰り返しは、記録しない
+    if (e.repeat) return;
     const text = hotkeyFromEvent(e, hotkeys);
     // 修飾キーだけのときは、続けて押すキーを待つ
-    if (!text) return;
-    take(id, text, false);
+    if (text) take(id, text);
+  }
+
+  function onRecordKeyUp(e: KeyboardEvent): void {
+    if (!recording || !sequencesOn) return;
+    if (e.key !== 'Enter' && e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (heldDone) {
+      heldDone = false;
+      return;
+    }
+    if (holding === e.key) {
+      // 長押しにならなかった: ふつうのキーとして記録する
+      clearTimeout(holdTimer);
+      holding = null;
+      take(recording, e.key);
+    }
   }
 
   function onRecordMouse(e: MouseEvent): void {
@@ -159,8 +208,8 @@
     if (!text) return;
     e.preventDefault();
     e.stopPropagation();
-    // マウスのボタンで、すぐに確定する
-    take(id, text, true);
+    // マウスのボタンは、押したキーとして足す（連続を記録しないときは、すぐ確定）
+    take(id, text);
   }
 
   $effect(() => {
@@ -168,19 +217,25 @@
     // 知らせる処理は、使う側の状態を書く。この効果の依存にしない
     untrack(() => onrecording?.(on));
     if (!on) {
-      clearTimeout(commitTimer);
-      untrack(() => (pending = []));
+      clearTimeout(holdTimer);
+      untrack(() => {
+        pending = [];
+        holding = null;
+        heldDone = false;
+      });
       return;
     }
     window.addEventListener('keydown', onRecordKey, true);
+    window.addEventListener('keyup', onRecordKeyUp, true);
     if (mouseOn) window.addEventListener('mouseup', onRecordMouse, true);
     return () => {
       window.removeEventListener('keydown', onRecordKey, true);
+      window.removeEventListener('keyup', onRecordKeyUp, true);
       if (mouseOn) window.removeEventListener('mouseup', onRecordMouse, true);
     };
   });
   onDestroy(() => {
-    clearTimeout(commitTimer);
+    clearTimeout(holdTimer);
     onrecording?.(false);
   });
 
@@ -225,8 +280,8 @@
         {:else}
           <span class="muted hotkey-none">なし</span>
         {/each}
-        {#if recording === c.id}
-          <span class="hotkey-recording" role="status">{pending.length > 0 ? `${formatHotkey(pending.join(' '))} → …` : 'キーを押してください…'}</span>
+        {#if recording === c.id && !sequencesOn}
+          <span class="hotkey-recording" role="status">キーを押してください…</span>
         {/if}
         <IconButton
           class="hotkey-reset"
@@ -241,9 +296,16 @@
           label={labelAdd(c.name)}
           title={recording === c.id ? '記録をやめる' : 'キーを追加'}
           active={recording === c.id}
-          onclick={() => (recording = recording === c.id ? null : c.id)}
+          onclick={() => {
+            if (recording === c.id) stop();
+            else {
+              stop();
+              recording = c.id;
+            }
+          }}
           onblur={() => {
-            if (recording === c.id) recording = null;
+            // 連続のキーを記録するときは、ダイアログのボタンを押せるように、フォーカスが外れても続ける
+            if (recording === c.id && !sequencesOn) recording = null;
           }}><Plus size={16} /></IconButton
         >
       {/snippet}
@@ -254,6 +316,23 @@
     {@render rowExtra?.(c)}
   </div>
 {/snippet}
+
+{#if recording !== null && sequencesOn}
+  <Modal title={`${nameOf(recording)}のキーを記録`} onclose={stop} width={460}>
+    <p class="muted hotkey-rec-help">押したキーが順に並びます。全部押したら「記録終了」を押します（Enter の長押しでも）。やめるときは「キャンセル」（Esc の長押しでも）。</p>
+    <div class="hotkey-rec-seq" role="status" aria-live="polite">
+      {#each pending as chord, i (i)}
+        <kbd class="kbd hotkey-rec-chord">{formatHotkey(chord)}</kbd>
+      {:else}
+        <span class="muted">キーを押してください…</span>
+      {/each}
+    </div>
+    <div class="hotkey-rec-actions">
+      <Button onclick={stop}>キャンセル</Button>
+      <Button variant="primary" disabled={pending.length === 0} onclick={finish}>記録終了</Button>
+    </div>
+  </Modal>
+{/if}
 
 {#if searchOn}
   <div class="hotkey-search">
@@ -353,6 +432,26 @@
   }
   .hotkey-remove:hover {
     opacity: 1;
+  }
+  .hotkey-rec-help {
+    margin: 0 0 var(--space-3);
+    font-size: var(--fs-sm);
+  }
+  .hotkey-rec-seq {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 2.4em;
+    padding: var(--space-2);
+    border: 1px solid var(--border, currentColor);
+    border-radius: var(--radius-md, 6px);
+  }
+  .hotkey-rec-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
   }
   .hotkey-none,
   .hotkey-recording {

@@ -278,55 +278,99 @@ describe('HotkeySettings: sequences・search', () => {
     await flush();
   };
 
-  it('sequences: キーを続けて押すと、つないで0.7 秒後に 1 つとして記録する。表示は、つながったところまでを出す', async () => {
+  const dialog = (): HTMLElement | null => document.querySelector('[role="dialog"]');
+  const seq = (): string[] => [...document.querySelectorAll('.hotkey-rec-chord')].map((e) => e.textContent?.trim() ?? '');
+  const btn = (text: string): HTMLButtonElement => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.trim() === text)!;
+  const keyup = (k: string): void => {
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: k, bubbles: true, cancelable: true }));
+  };
+  async function open(label: string): Promise<void> {
+    document.querySelector<HTMLElement>('.hotkey-group-toggle')!.click();
+    await flush();
+    document.querySelector<HTMLElement>(`button[aria-label="${label}のキーを追加"]`)!.click();
+    await flush();
+  }
+
+  it('sequences: ダイアログに押したキーが順に並び、「記録終了」を押すまで確定しない（時間では確定しない）', async () => {
     vi.useFakeTimers();
     try {
       const { spy } = mountWith({ sequences: true });
-      document.querySelector<HTMLElement>('.hotkey-group-toggle')!.click();
-      await flush();
-      document.querySelector<HTMLElement>('button[aria-label="新規のキーを追加"]')!.click();
-      await flush();
+      await open('新規');
+      expect(dialog()).not.toBeNull();
+      expect(btn('記録終了').disabled).toBe(true);
+      press('g');
+      vi.advanceTimersByTime(5000);
       press('g');
       await flush();
+      expect(seq()).toEqual(['G', 'G']);
       expect(spy.add).not.toHaveBeenCalled();
-      expect(document.querySelector('[data-command="new"] .hotkey-recording')!.textContent).toContain('G → …');
-      vi.advanceTimersByTime(300);
-      press('g');
-      await flush();
-      expect(document.querySelector('[data-command="new"] .hotkey-recording')!.textContent).toContain('G → G → …');
-      vi.advanceTimersByTime(800);
+      btn('記録終了').click();
       await flush();
       expect(spy.add).toHaveBeenCalledWith('new', 'G G');
-      expect(document.querySelector('[data-command="new"] .hotkey-recording')).toBeNull();
+      expect(dialog()).toBeNull();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('sequences: 1 回だけ押して待つと、1 回のキーとして記録する。この間に他を押してフォーカスが外れると、記録しない。マウスはすぐ確定', async () => {
+  it('sequences: 押しっぱなしの繰り返しは足さない。「キャンセル」・ダイアログの外・「＋」で、記録せずに閉じる。マウスの戻る・進むも足せる', async () => {
+    const { spy } = mountWith({ sequences: true });
+    await open('閉じる');
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', bubbles: true, cancelable: true }));
+    for (let i = 0; i < 10; i++) window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', repeat: true, bubbles: true, cancelable: true }));
+    await flush();
+    expect(seq()).toEqual(['X']);
+    window.dispatchEvent(new MouseEvent('mouseup', { button: 4, bubbles: true, cancelable: true }));
+    await flush();
+    expect(seq()).toEqual(['X', 'マウス進む']);
+    btn('キャンセル').click();
+    await flush();
+    expect(dialog()).toBeNull();
+    expect(spy.add).not.toHaveBeenCalled();
+    // 外を押しても閉じる
+    document.querySelector<HTMLElement>('button[aria-label="閉じるのキーを追加"]')!.click();
+    await flush();
+    document.querySelector<HTMLElement>('.modal-scrim')!.click();
+    await flush();
+    expect(dialog()).toBeNull();
+    expect(spy.add).not.toHaveBeenCalled();
+  });
+
+  it('sequences: Enter・Esc は、短く押せばキーとして記録し、長押し（0.6 秒）で「記録終了」「キャンセル」になる', async () => {
     vi.useFakeTimers();
     try {
       const { spy } = mountWith({ sequences: true });
-      document.querySelector<HTMLElement>('.hotkey-group-toggle')!.click();
+      await open('新規');
+      press('k');
+      // 短い Enter: キー Enter として足す
+      press('Enter', 'Enter');
+      vi.advanceTimersByTime(100);
+      keyup('Enter');
       await flush();
-      const plus = () => document.querySelector<HTMLElement>('button[aria-label="閉じるのキーを追加"]')!;
-      plus().click();
+      expect(seq()).toEqual(['K', 'Enter']);
+      // 長い Enter: 確定
+      press('Enter', 'Enter');
+      for (let i = 0; i < 5; i++) {
+        vi.advanceTimersByTime(150);
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat: true, bubbles: true, cancelable: true }));
+      }
       await flush();
-      press('x');
-      vi.advanceTimersByTime(800);
+      expect(spy.add).toHaveBeenCalledWith('new', 'K Enter');
+      expect(dialog()).toBeNull();
+      keyup('Enter');
+      // 長い Esc: キャンセル（短い Esc は、キーとして足す）
+      document.querySelector<HTMLElement>('button[aria-label="新規のキーを追加"]')!.click();
       await flush();
-      expect(spy.add).toHaveBeenLastCalledWith('close', 'X');
-      plus().click();
+      press('Escape', 'Escape');
+      vi.advanceTimersByTime(100);
+      keyup('Escape');
       await flush();
-      press('y');
-      plus().click(); // もう一度押して取り消す
+      expect(seq()).toEqual(['Esc']);
+      press('Escape', 'Escape');
+      vi.advanceTimersByTime(700);
       await flush();
-      vi.advanceTimersByTime(800);
+      expect(dialog()).toBeNull();
       expect(spy.add).toHaveBeenCalledTimes(1);
-      plus().click();
-      await flush();
-      window.dispatchEvent(new MouseEvent('mouseup', { button: 4, bubbles: true, cancelable: true }));
-      expect(spy.add).toHaveBeenLastCalledWith('close', 'Mouse5');
     } finally {
       vi.useRealTimers();
     }
