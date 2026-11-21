@@ -360,7 +360,16 @@ describe('HotkeySettings: sequences・search', () => {
       await flush();
       expect(spy.add).toHaveBeenCalledWith('new', 'K Enter');
       expect(dialog()).toBeNull();
+      // 記録を終えたあと、キーを離すまでは、元の画面に Enter を届けない（離したあとは届く）
+      const reached: string[] = [];
+      const spyKey = (e: KeyboardEvent): number => reached.push(e.type + ':' + e.key);
+      document.addEventListener('keydown', spyKey);
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat: true, bubbles: true, cancelable: true }));
+      expect(reached).toEqual([]);
       keyup('Enter');
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+      expect(reached).toEqual(['keydown:Enter']);
+      document.removeEventListener('keydown', spyKey);
       // 長い Esc: キャンセル（短い Esc は、キーとして足す）
       document.querySelector<HTMLElement>('button[aria-label="新規のキーを追加"]')!.click();
       await flush();

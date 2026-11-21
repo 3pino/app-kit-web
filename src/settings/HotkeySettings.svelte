@@ -122,6 +122,33 @@
   /** 長押しで処理したあと、そのキーを離すまで、記録に入れない */
   let heldDone = false;
 
+  /**
+   * 長押しで記録を終えたあと、そのキーを離すまでは、元の画面に届けない
+   * （押しっぱなしの繰り返しが、元の画面の Enter・Esc として働いてしまうのを防ぐ）
+   */
+  function swallowUntilKeyUp(key: string): void {
+    const off = (): void => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      clearTimeout(guard);
+    };
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== key) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    const onKeyUp = (e: KeyboardEvent): void => {
+      if (e.key !== key) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      off();
+    };
+    // 離したことを見逃しても（ウィンドウが外れたなど）、止まらないようにする
+    const guard = setTimeout(off, 10_000);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+  }
+
   function stop(): void {
     clearTimeout(holdTimer);
     holding = null;
@@ -172,6 +199,7 @@
         heldDone = true;
         const was = holding;
         holding = null;
+        if (was) swallowUntilKeyUp(was);
         if (was === 'Enter') finish();
         else stop();
       }, HOLD_MS);

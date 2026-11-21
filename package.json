@@ -1,6 +1,6 @@
 {
   "name": "@3pino/app-kit-web",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "3pino のアプリの土台（Svelte 5 / TypeScript）。プラットフォームの判定・ストレージ・ネイティブ呼び出し・トースト・確認・拡大表示・戻る操作など、アプリに依らない部分",
   "license": "MIT",
   "type": "module",
